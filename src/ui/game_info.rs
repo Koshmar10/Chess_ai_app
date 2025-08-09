@@ -8,7 +8,7 @@ impl MyApp {
         let unit =  &self.ui.square_size;
         //settings
         let timer_size = Vec2::new(2.0*unit, *unit*2.0 /3.0);
-        let pad = 10.0;
+        let pad = 12.0;
         let pfp_size = 1.5*unit;
         let label_size = unit *2.0;
         

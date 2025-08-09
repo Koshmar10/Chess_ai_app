@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use stockfish::Stockfish;
 
 use crate::{engine::PieceColor, game::stockfish_engine::{StockfishCmd, StockfishResult}};
-
+#[derive(Clone)]
 pub enum GameMode { PvP, PvE, Sandbox}
-pub enum LostBy {Checkmate, StaleMate, Draw}
+#[derive(Clone)]
+pub enum LostBy {Checkmate, StaleMate, Draw, Timeout} 
 pub struct GameController {
     pub mode:GameMode,
     pub player: PieceColor,
@@ -17,6 +18,7 @@ pub struct GameController {
     pub stockfish_tx: Option<std::sync::mpsc::Sender<StockfishCmd>>,
     pub stockfish_move_pending: bool,
     pub search_depth: usize,
+   
 }
 
 impl Default for GameController {
@@ -32,6 +34,7 @@ impl Default for GameController {
             stockfish_tx:None,
             search_depth:20,
             lost_by: None,
+            
         }
     }
 }

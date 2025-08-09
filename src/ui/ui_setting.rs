@@ -8,7 +8,7 @@ pub struct UiSettings {
     pub subtitle_size: f32,
     pub menu_quote: Option<String>,
     pub default_subtitle:String,
-    
+    pub padding: u32,
 }
 impl Default for  UiSettings {
     fn default() -> Self {
@@ -19,8 +19,8 @@ impl Default for  UiSettings {
             timer_inside: Color32::from_rgba_unmultiplied(38, 38, 37, 255),
             timer_outside: Color32::DARK_GRAY,
             default_subtitle: String::from("- The great chess experience -"),
-            menu_quote: None
-            
+            menu_quote: None,
+            padding: 8,
         }
     }
 }

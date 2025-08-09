@@ -1,6 +1,6 @@
 use eframe::{egui::{self, vec2, CentralPanel, Color32, Frame, SidePanel, Stroke}, CreationContext};
 
-use crate::{engine::{Board, PieceColor, PieceType}, game::controller::{GameController, GameMode}, ui::{theme, ui_setting::UiSettings, DEFAULT_FEN}};
+use crate::{engine::{Board, PieceColor, PieceType}, game::{controller::{GameController, GameMode}, evaluator::Evaluator}, ui::{theme, ui_setting::UiSettings, DEFAULT_FEN}};
 
 pub enum AppScreen {
     MainMenu,
@@ -17,6 +17,7 @@ pub struct MyApp {
     pub theme: theme::ThemeLoader,
     pub board: Board,
     pub game: GameController,
+    pub evaluator: Evaluator,
     pub ui: UiSettings,
 }
 
@@ -27,14 +28,19 @@ impl From<&CreationContext<'_>> for MyApp{
 
     fn from(cc : &CreationContext) -> Self {
 
-        Self {
-            screen: AppScreen::MainMenu,
-            popup: None,
-            theme: theme::ThemeLoader::from(cc),
-            board: Board::from(&DEFAULT_FEN.to_owned()),
-            game: GameController::default(),
-            ui : UiSettings::default()
-        }
+        let mut app = 
+            Self {
+
+                screen: AppScreen::MainMenu,
+                popup: None,
+                theme: theme::ThemeLoader::from(cc),
+                board: Board::from(&DEFAULT_FEN.to_owned()),
+                game: GameController::default(),
+                evaluator: Evaluator::new(),
+                ui : UiSettings::default()
+            };
+        app.start_evaluator();
+        return app
 
         
 

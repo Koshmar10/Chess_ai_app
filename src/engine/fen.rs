@@ -1,4 +1,6 @@
-use crate::engine::{board::BoardState, Board, ChessPiece, PieceColor, PieceType};
+use std::fs::Metadata;
+
+use crate::engine::{board::{BoardMetaData, BoardState}, Board, ChessPiece, PieceColor, PieceType};
 
 pub enum FenError{
     InvalidChar(char)
@@ -80,6 +82,7 @@ pub fn fen_parser(fen: &String) -> Result<Board, FenError>{
         fullmove_number,
         en_passant_target: en_passant_target,
         state: BoardState::default(),
+        meta_data: BoardMetaData::default(),
     })
 }
 

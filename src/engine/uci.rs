@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::engine::{Board, PieceType};
+use crate::engine::{Board, PieceColor, PieceType};
 
 impl Board{
 
@@ -78,5 +78,48 @@ impl Board{
             // 3) Normal move (no changes needed)
             _ => Some((from, to))
         }
+    }
+
+    /// Encodes a move from board coordinates to UCI format (e.g., "e2e4" or "a7a8q")
+    pub fn encode_uci_move(&self, from: (u8, u8), to: (u8, u8), promotion: Option<PieceType>) -> String {
+        // Map board coordinates to algebraic notation
+        let file_chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        
+        // Convert from coordinates (rank, file) to algebraic
+        let from_file = file_chars[from.1 as usize];
+        let from_rank = 8 - from.0;  // 0 -> 8, 7 -> 1
+        
+        // Convert to coordinates to algebraic
+        let to_file = file_chars[to.1 as usize];
+        let to_rank = 8 - to.0;      // 0 -> 8, 7 -> 1
+        
+        // Start building the UCI move string
+        let mut uci = format!("{}{}{}{}", from_file, from_rank, to_file, to_rank);
+        
+        // Check if this is a promotion move
+        if let Some(piece_type) = promotion {
+            // Get the promotion character and append it
+            let promotion_char = match piece_type {
+                PieceType::Queen => 'q',
+                PieceType::Rook => 'r', 
+                PieceType::Bishop => 'b',
+                PieceType::Knight => 'n',
+                _ => panic!("Invalid promotion piece type"),
+            };
+            uci.push(promotion_char);
+        } else if let Some(piece) = &self.squares[from.0 as usize][from.1 as usize] {
+            // Auto-detect promotion if we're moving a pawn to the end rank
+            if piece.kind == PieceType::Pawn {
+                let is_promotion = (piece.color == PieceColor::White && to.0 == 0) || 
+                                  (piece.color == PieceColor::Black && to.0 == 7);
+                
+                if is_promotion {
+                    // Default to queen promotion if not specified
+                    uci.push('q');
+                }
+            }
+        }
+        
+        uci
     }
 }

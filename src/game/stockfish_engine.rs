@@ -9,17 +9,21 @@ pub enum StockfishCmd {
     GoDepth(usize),
     Go(String),
     Stop,
+    Eval,
 }
 pub enum StockfishResult {
     Succes,
     Fail,
     Move(String),
 }
+
 pub enum StockfishOutput { InvalidOutput, ValidOutput(String)}
 impl MyApp{
 
     pub fn start_stockfish(&mut self){
+
         self.game.stockfish = match Stockfish::new("/usr/bin/stockfish") {
+            
             Ok(mut s) => {
                 match s.setup_for_new_game(){
                     Ok(_) => {
@@ -51,7 +55,7 @@ impl MyApp{
         self.game.stockfish_rx = Some(res_rx);
         
                 // … inside your spawn:
-                thread::spawn(move || {
+                let _ = thread::Builder::new().name("player_stockfish".to_string()).spawn(move || {
                     println!("Spawned thread");
                     let mut engine = stockfish.lock().unwrap();
                     // make sure engine is fresh
@@ -62,7 +66,10 @@ impl MyApp{
                             Ok(cmd) => {
                                 match cmd {
                                     StockfishCmd::NewGame => {
-                                        let _ = engine.setup_for_new_game();
+                                        match  engine.setup_for_new_game(){
+                                            Err(e)=> println!("{:?}", e),
+                                            Ok(_) => println!("Setup for new game succesfull"),
+                                        }
                                         let _ = res_tx.send(StockfishResult::Succes);
                                     }
                                     StockfishCmd::GoDepth(depth) => {
@@ -86,9 +93,24 @@ impl MyApp{
                                         }
                                     }
                                     StockfishCmd::Stop => {
-                                        let _ = engine.quit();
+                                        match  engine.setup_for_new_game(){
+                                            Err(e)=> println!("{:?}", e),
+                                            Ok(_) => println!("Setup for new game succesfull"),
+                                        }
                                         let _ = res_tx.send(StockfishResult::Succes);
                                         break;
+                                    }
+                                    StockfishCmd::Eval =>{
+                                        match engine.go() {
+                                            
+                                            Ok(output) => {
+                                               let evaluation_score = output.eval();
+                                            }
+                                            Err(e) => {
+                                                eprintln!("engine.go() error: {:?}", e);
+                                                let _ = res_tx.send(StockfishResult::Fail);
+                                            }
+                                        }
                                     }
                                 }
                             }

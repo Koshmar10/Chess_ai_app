@@ -1,6 +1,6 @@
 use eframe::egui::Response;
 
-use crate::{engine::{ChessPiece, PieceColor, PieceType}, game::{controller::GameMode, stockfish_engine::{StockfishCmd, StockfishResult}}, ui::app::{MyApp, PopupType}};
+use crate::{engine::{ChessPiece, PieceColor, PieceType}, game::{controller::GameMode, evaluator::EvalKind, stockfish_engine::{StockfishCmd, StockfishResult}}, ui::app::{MyApp, PopupType}};
 
 
 impl MyApp{
@@ -30,7 +30,9 @@ impl MyApp{
                                             Err(e) => {
                                                 println!("cannot move");
                                             }
-                                            _ => {}
+                                            _ => {
+                                                self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                            }
                                         }
                                     
                                 }
@@ -61,7 +63,9 @@ impl MyApp{
                             Some(piece) => {
                                 if piece.color !=  selected_piece.color {
                                     match self.board.move_piece(selected_piece.position, piece.position){
-                                        Ok(_) => { println!("Ok");}
+                                        Ok(_) => { 
+                                            self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                            println!("Ok");}
                                         Err(_) => {
                                             println!("Not Ok");
                                         }
@@ -74,8 +78,17 @@ impl MyApp{
                                             match &self.board.state.capture_moves{
                                                 Some(moves) => {
                                                     if moves.contains(&piece.position){
-                                                    self.board.execute_castle(selected_piece.position, piece.position);
-                                                    self.board.deselect_piece();
+                                                        match self.board.execute_castle(selected_piece.position, piece.position){
+                                                            Ok(_) => {
+                                                                self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                                            }
+                                                            _ => {}
+                                                        }
+                                                        self.board.deselect_piece();
+                                                       
+                                                    }
+                                                    else {
+                                                        self.board.select_piece(*piece);
                                                     }
                                                 }
                                                 _=>{}
@@ -92,7 +105,9 @@ impl MyApp{
                             }
                             None => {
                                 match self.board.move_piece(selected_piece.position, *poz){
-                                    Ok(_) => { println!("Ok");}
+                                    Ok(_) => { 
+                                        self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                        println!("Ok");}
                                     Err(_) => {
                                         println!("Not Ok");
                                     }
@@ -159,7 +174,7 @@ impl MyApp{
                             if piece.color !=  selected_piece.color {
                                 match self.board.move_piece(selected_piece.position, piece.position){
                                     Ok(_) => { 
-                                       
+                                        self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
                                         println!("Ok");}
                                     Err(_) => {
                                         println!("Not Ok");
@@ -173,7 +188,12 @@ impl MyApp{
                                         match &self.board.state.capture_moves{
                                             Some(moves) => {
                                                 if moves.contains(&piece.position){
-                                                self.board.execute_castle(selected_piece.position, piece.position);
+                                                match self.board.execute_castle(selected_piece.position, piece.position){
+                                                    Ok(_) => {
+                                                        self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                                    }
+                                                    _ => {}
+                                                }
                                                 self.board.deselect_piece();
                                                 }
                                             }
@@ -190,7 +210,9 @@ impl MyApp{
                         }
                         None => {
                             match self.board.move_piece(selected_piece.position, *poz){
-                                Ok(_) => { println!("Ok");}
+                                Ok(_) => { 
+                                    self.evaluator.send_eval_request(self.board.to_string(), EvalKind::BarEval);
+                                    println!("Ok");}
                                 Err(_) => {
                                     println!("Not Ok");
                                 }

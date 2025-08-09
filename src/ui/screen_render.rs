@@ -1,6 +1,6 @@
 use eframe::egui::{self, vec2, Button, CentralPanel, Color32, CornerRadius, Frame, SidePanel, Stroke};
 
-use crate::{engine::{Board, PieceColor, PieceType}, game::controller::{GameController, GameMode}, ui::{app::{AppScreen, MyApp}, DEFAULT_FEN}};
+use crate::{engine::{Board, PieceColor, PieceType}, game::{controller::{GameController, GameMode}, stockfish_engine::StockfishCmd}, ui::{app::{AppScreen, MyApp}, DEFAULT_FEN}};
 
 
 
@@ -166,8 +166,13 @@ impl MyApp{
                 if ui.button("end-game").clicked() {
                     self.board = Board::from(&DEFAULT_FEN.to_owned());
                     self.game.game_over = true;
-                    self.game = GameController::default();
+                    if let Some(tx) = &self.game.stockfish_tx {
+                        if let Err(e) = tx.send(StockfishCmd::Stop) {
+                            eprintln!("failed to send `stop` to stockfish: {}", e);
+                        }
+                    }
                 }
+                ui.label(format!("current eval: {}", self.get_evaluation()));
 
                 ui.vertical(|ui| {
                     let check = if self.board.is_in_check(PieceColor::White) {"true"} else {"false"};
@@ -214,9 +219,12 @@ impl MyApp{
                         ui.min_rect().center().x - board_size / 2.0,
                         ui.min_rect().center().y - board_size / 2.0,
                     );
+                    self.render_eval_bar(top_left, ui, true);
+                    self.render_move_history(top_left, ui, true);
                     self.render_board(top_left, ui);
+                    ctx.request_repaint();
                     self.render_game_info(top_left, ui);
-                    if let Some((x, y)) = self.board.state.promtion_pending {
+                    if let Some((new_pos, old_pos)) = self.board.state.promtion_pending {
                         egui::Window::new("Promote Pawn")
                             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                             .collapsible(false)
@@ -231,7 +239,8 @@ impl MyApp{
                                         PieceType::Rook,
                                     ] {
                                         if ui.button(kind.to_string()).clicked() {
-                                            self.board.promote_pawn((x, y), kind);
+                                            self.board.record_move(old_pos, new_pos, Some(kind), false);
+                                            self.board.promote_pawn(new_pos, kind);
                                             self.board.state.promtion_pending = None;
                                             ctx.request_repaint();
                                         }

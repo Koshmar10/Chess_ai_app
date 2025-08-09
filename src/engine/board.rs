@@ -1,4 +1,7 @@
-use crate::{engine::{fen::fen_parser, move_gen::MoveError, ChessPiece, PieceColor, PieceType}, etc::{DEFAULT_FEN, DEFAULT_STARTING}};
+use std::{error::Error};
+
+use crate::{engine::{fen::fen_parser, move_gen::MoveError, ChessPiece, PieceColor, PieceType}, etc::{DEFAULT_FEN, DEFAULT_STARTING}, game::controller::LostBy};
+use chrono::Local;
 
 #[derive(Clone)]
 pub struct Board{
@@ -12,6 +15,7 @@ pub struct Board{
     pub fullmove_number: u32,
     pub en_passant_target: Option<(u8,u8)>,
     pub state: BoardState,
+    pub meta_data: BoardMetaData,
 
 }
 
@@ -25,9 +29,39 @@ pub struct BoardState {
     pub pov: PieceColor,
     pub white_taken:     Vec<ChessPiece>,
     pub black_taken:     Vec<ChessPiece>,
-    pub promtion_pending: Option<(u8, u8)>,
-    pub checkmate_square: Option<(u8, u8)>
+    pub promtion_pending: Option<((u8, u8), (u8,u8))>,
+    pub checkmate_square: Option<(u8, u8)>,
+    pub past_evaluation: f32, 
+    pub current_evaluation: f32,
 
+}
+#[derive(Clone)]
+pub enum GameResult {WhiteWin, BlackWin, Draw, Unfinished}
+#[derive(Clone)]
+pub struct BoardMetaData{
+    pub starting_position: String,
+    pub date: String,
+    pub move_list: Vec<MoveStruct>,
+    pub termination: LostBy,
+    pub result: GameResult,
+    pub white_player_elo: u32,
+    pub black_player_elo: u32,
+    pub white_player_name: String,
+    pub black_player_name: String,
+    
+
+}
+#[derive(Clone)]
+pub struct MoveStruct{
+    pub move_number: usize,
+    pub san: String,
+    pub uci: String,
+    pub from: String,
+    pub to: String,
+    pub promotion: Option<PieceType>,
+    pub is_capture:bool,
+    pub evaluation: f32,
+    pub time_stamp: f32,
 }
 
 #[derive(Clone)]
@@ -49,6 +83,7 @@ impl Default for Board{
             fullmove_number: 1,
             en_passant_target: None,
             state:BoardState::default(),
+            meta_data:BoardMetaData::default(),
 
         },   
     }
@@ -67,9 +102,62 @@ impl Default for BoardState{
             black_taken: Vec::new(),
             promtion_pending: None,
             checkmate_square: None,
+            past_evaluation: 0.0,
+            current_evaluation:0.0,
         }
     }
 }
+impl Default for BoardMetaData {
+    fn default() -> Self {
+        Self{
+            starting_position: DEFAULT_FEN.to_string(),
+            date: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            move_list: Vec::new(),
+            termination: LostBy::Draw,
+            result: GameResult::Unfinished,
+            white_player_elo: 0,
+            black_player_elo: 0,
+            white_player_name: String::new(),
+            black_player_name: String::new(),
+        }
+    }
+        }
+  
+impl Default for MoveStruct {
+    fn default() -> Self {
+        MoveStruct {
+            move_number: 0,
+            san: String::new(),
+            uci: String::new(),
+            from: String::new(),
+            to: String::new(),
+            promotion: None,
+            is_capture: false,
+            evaluation: 0.0,
+            time_stamp: 0.0,
+        }
+    }
+}
+
+impl From<&str> for MoveStruct {
+    fn from(uci: &str) -> Self {
+        let mut mv = MoveStruct::default();
+        mv.uci = uci.to_string();
+        mv.from = uci.get(0..2).unwrap_or_default().to_string();
+        mv.to = uci.get(2..4).unwrap_or_default().to_string();
+        if let Some(p) = uci.chars().nth(4) {
+            mv.promotion = Some(match p.to_ascii_lowercase() {
+                'q' => PieceType::Queen,
+                'r' => PieceType::Rook,
+                'b' => PieceType::Bishop,
+                'n' => PieceType::Knight,
+                _ => return mv,
+            });
+        }
+        mv
+    }
+}
+
 impl From<&String> for Board{
     fn from(fen: &String) -> Self {
         match fen_parser(fen){
@@ -106,6 +194,16 @@ impl Board {
                     match moving_piece.kind {
                         PieceType::Pawn => {
                             //pawn capture decide
+                            match moving_piece.color {
+                                PieceColor::Black => {
+                                    if new_pos.0 == 7 {self.state.promtion_pending = Some((new_pos, old_pos));}
+                                }
+                                PieceColor::White => {
+                                    
+                                    if new_pos.0 == 0 {self.state.promtion_pending = Some((new_pos, old_pos));}
+                                }
+                            }
+
                             match capture_piece {
                                 Some(_) => {
                                     //normal capture
@@ -124,6 +222,10 @@ impl Board {
                                         }
                                     }
                                     self.en_passant_target = None;
+                                    if !self.state.promtion_pending.is_some() {
+                                        let uci = self.encode_uci_move(old_pos, new_pos, None);
+                                        self.record_move(old_pos, new_pos, None, true);
+                                    }
                                     self.change_turn();
                                     self.deselect_piece();
                                 }
@@ -147,12 +249,15 @@ impl Board {
                                     }
                                     self.squares[epr as usize][epf as usize]=None;
                                     self.en_passant_target = None;
+                                    if !self.state.promtion_pending.is_some() {
+                                        let uci = self.encode_uci_move(old_pos, new_pos, None);
+                                        self.record_move(old_pos, new_pos, None, true);
+                                    }
                                     self.change_turn();
                                     self.deselect_piece();
                                 }
                             }
                             
-
                         }
                         _ =>{
                             moving_piece.times_moved+=1;
@@ -171,6 +276,8 @@ impl Board {
                                     self.state.black_taken.push(capture);
                                 }
                             }
+                            let uci = self.encode_uci_move(old_pos, new_pos, None);
+                            self.record_move(old_pos, new_pos, None, true);
                             self.change_turn();
                             self.deselect_piece();
                         }
@@ -199,11 +306,16 @@ impl Board {
                     if piece.kind == PieceType::Pawn {
                         self.halfmove_clock = 0;
                     }
-
+                    let uci = self.encode_uci_move(old_pos, new_pos, None);
+                    self.record_move(old_pos, new_pos, None, false);
+                                   
                     self.change_turn();
                     self.deselect_piece();
                     
 
+                }
+                else {
+                    return Err(MoveError::IllegalMove);
                 }
                 
             }
@@ -227,7 +339,7 @@ impl Board {
         };
     }
     
-    pub fn execute_castle(&mut self, king_pos:(u8,u8), rook_pos: (u8,u8)) {
+    pub fn execute_castle(&mut self, king_pos:(u8,u8), rook_pos: (u8,u8))-> Result<(), Box<dyn Error>>{
         //get mut king rook
         let mut king = self.squares[king_pos.0 as usize][king_pos.1 as usize].unwrap();
         let mut rook: ChessPiece = self.squares[rook_pos.0 as usize][rook_pos.1 as usize].unwrap();
@@ -258,7 +370,7 @@ impl Board {
             self.squares[rook_pos.0 as usize][rook_pos.1 as usize] = None;
             
             self.squares[king.position.0 as usize][king.position.1 as usize] = Some(king);
-        self.squares[rook.position.0 as usize][rook.position.1 as usize] = Some(rook); 
+            self.squares[rook.position.0 as usize][rook.position.1 as usize] = Some(rook); 
         
         match king.color {
             PieceColor::Black => {
@@ -275,7 +387,11 @@ impl Board {
         }
         self.change_turn();
         self.deselect_piece();
+        return Ok(());
     
+    }
+    else {
+        return Err("Cannot castle".into());
     }
 
 
@@ -293,6 +409,59 @@ impl Board {
         self.state.capture_moves = None;
         self.state.selected_piece = None;
         self.state.quiet_moves = None;
+    }
+    pub fn record_move(&mut self, from: (u8, u8), to: (u8, u8), promotion: Option<PieceType>, is_capture: bool) {
+        let uci = self.encode_uci_move(from, to, promotion);
+        
+        // Convert board coordinates to algebraic notation
+        let file_chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        let from_file = file_chars[from.1 as usize];
+        let from_rank = 8 - from.0;
+        let to_file = file_chars[to.1 as usize];
+        let to_rank = 8 - to.0;
+        let mut move_record = MoveStruct {
+            move_number: self.fullmove_number as usize,
+            uci: uci,
+            from: format!("{}{}", from_file, from_rank),
+            to: format!("{}{}", to_file, to_rank),
+            promotion: promotion,
+            is_capture: is_capture,
+            evaluation: 0.0,
+            time_stamp: 0.0,
+            san: "".to_string(), // Could use std::time::SystemTime if needed
+        };
+        
+        // For SAN notation you would need more complex logic
+        // This is a simplified version that just shows the piece movement
+        if let Some(piece) = self.squares[to.0 as usize][to.1 as usize].as_ref() {
+            let piece_letter = match piece.kind {
+                PieceType::Pawn => "",
+                PieceType::Knight => "N",
+                PieceType::Bishop => "B",
+                PieceType::Rook => "R",
+                PieceType::Queen => "Q",
+                PieceType::King => "K",
+            };
+            
+            let capture_symbol = if is_capture { "x" } else { "" };
+            
+            move_record.san = format!(
+                "{}{}{}{}{}",
+                piece_letter,
+                move_record.from,
+                capture_symbol,
+                move_record.to,
+                promotion.map_or("".to_string(), |p| match p {
+                    PieceType::Queen => "=Q",
+                    PieceType::Rook => "=R",
+                    PieceType::Bishop => "=B",
+                    PieceType::Knight => "=N",
+                    _ => "",
+                }.to_string())
+            );
+        }
+        
+        self.meta_data.move_list.push(move_record);
     }
     
 }
