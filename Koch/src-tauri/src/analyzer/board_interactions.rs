@@ -1,18 +1,14 @@
 use crate::{
     analyzer::analyzer::{AnalyzerController, BoardState, MoveKind, UndoInfo},
     engine::{
-        board::{MoveStruct, PieceMoves},
+        board::PieceMoves,
         move_gen::MoveError,
-        serializer::{
-            serialize_analyzer_controller, SerializedAnalyzerController, SerializedBoard,
-        },
+        serializer::{serialize_analyzer_controller, SerializedAnalyzerController},
         Board, ChessPiece, PieceColor, PieceType,
     },
-    server::server::{PvObject, ServerState},
+    server::server::ServerState,
 };
-use serde::{Deserialize, Serialize};
-use std::{char, error::Error, sync::Mutex};
-use ts_rs::TS;
+use std::sync::Mutex;
 
 pub enum AnalyzerWindowOprion {
     Emtpy,
@@ -40,8 +36,8 @@ impl Board {
             captured_at: (0, 0),
         };
 
-        let mut normal_move: bool = true;
-        let mut normal_enum = MoveKind::Normal {
+        let _normal_move: bool = true;
+        let normal_enum = MoveKind::Normal {
             promotion: promotion,
         };
 
@@ -201,21 +197,17 @@ impl Board {
             (PieceType::Rook, PieceColor::White) => {
                 if old_pos == (7, 0) {
                     self.white_big_castle = false;
-                    println!();
                 }
                 if old_pos == (7, 7) {
                     self.white_small_castle = false;
-                    println!();
                 }
             }
             (PieceType::Rook, PieceColor::Black) => {
                 if old_pos == (0, 0) {
                     self.black_big_castle = false;
-                    println!();
                 }
                 if old_pos == (0, 7) {
                     self.black_small_castle = false;
-                    println!();
                 }
             }
             _ => {}
@@ -402,7 +394,6 @@ pub fn get_board_at_index(
 
     //compute move delta
     if move_index > state.analyzer_controller.current_ply as isize {
-        println!("did new move update");
         //this means the is a forward move
         let mut starting_board = state.analyzer_controller.board.clone();
         let mut new_undo = state.analyzer_controller.board_undo.clone();
@@ -457,7 +448,7 @@ pub fn get_board_at_index(
                 return None;
             }
         }
-        println!("did old move update");
+
         starting_board.meta_data = state.analyzer_controller.board.meta_data.clone();
         starting_board.rerender_move_cache();
         let anal = AnalyzerController {

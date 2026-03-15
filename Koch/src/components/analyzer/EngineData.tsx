@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event"; // Import listen
 import { PvObject } from "../../../src-tauri/bindings/PvObject";
 import { LoaderCircle } from "lucide-react";
 import { Dispatch, SetStateAction, useEffect, useState } from "react"; // Import useEffect, useState

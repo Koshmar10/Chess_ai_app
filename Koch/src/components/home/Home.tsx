@@ -2,15 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react"
 import { TrendingUp, Trophy, Target, Medal, Zap, Clock, Gamepad2, Bot, Puzzle, ChartColumn } from "lucide-react";
 import { BottomCard } from "./BottomCard";
-
+import { PlayerStatistics } from "../../../src-tauri/bindings/PlayerStatistics"
 export function Home() {
     const [chessQuote, setChessQuote] = useState<string | null>(null)
+    const [playerStats, setPlayerStats] = useState<PlayerStatistics | null>(null);
     useEffect(() => {
+        async function getPlayerStats() {
+            const statas = await invoke<PlayerStatistics | null>('get_player_stats');
+            setPlayerStats(statas);
+        }
         async function fetchQuote() {
             // Example API call, replace with your actual endpoint
             const quote = await invoke<string | null>('get_quote')
             setChessQuote(quote)
         }
+        getPlayerStats();
         fetchQuote();
     }, []);
 
@@ -35,7 +41,7 @@ export function Home() {
                                 <TrendingUp size={20} className="h-5 w-5 text-primary-dark" strokeWidth={1.5} />
                             </div>
                             <div>
-                                <div className="text-2xl font-bold text-foreground-dark">2145</div>
+                                <div className="text-2xl font-bold text-foreground-dark">{playerStats?.current_elo}</div>
                                 <div className="text-xs text-secondary-dark/70">Current Rating</div>
                                 <div className="text-[10px] text-green-500 mt-1">+32 this month</div>
                             </div>
@@ -60,7 +66,7 @@ export function Home() {
                                 <div className={iconContainer}>
                                     <Trophy size={20} className="h-5 w-5 text-primary-dark" />
                                 </div>
-                                <div className="text-2xl font-bold text-foreground-dark">64%</div>
+                                <div className="text-2xl font-bold text-foreground-dark">{playerStats?.win_rate}%</div>
                                 <div className="text-xs text-secondary-dark/70">Win Rate</div>
                                 <div className="text-[10px] text-green-500 mt-1">+5%</div>
                             </div>
@@ -74,7 +80,7 @@ export function Home() {
                             <Clock size={20} className="h-5 w-5 text-primary-dark" />
                         </div>
                         <div>
-                            <div className="text-3xl font-bold text-foreground-dark">48h</div>
+                            <div className="text-3xl font-bold text-foreground-dark">{playerStats?.time_played}</div>
                             <div className="text-sm text-secondary-dark/70">Total Time</div>
                         </div>
                     </div>
@@ -99,7 +105,7 @@ export function Home() {
                             <div className={iconContainer}>
                                 <Target size={20} className="h-5 w-5 text-primary-dark" />
                             </div>
-                            <div className="text-2xl font-bold text-foreground-dark">127</div>
+                            <div className="text-2xl font-bold text-foreground-dark">{playerStats?.games_played}</div>
                             <div className="text-xs text-secondary-dark/70">Games Played</div>
                         </div>
                     </div>

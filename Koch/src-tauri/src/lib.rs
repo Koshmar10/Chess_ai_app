@@ -1,15 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 pub mod engine;
-use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::mpsc;
 use std::sync::Mutex;
-use std::thread;
 
-use std::time::Instant;
 use sysinfo::System;
-//pub mod game;
 pub mod ai;
 pub mod analyzer;
 pub mod database;
@@ -23,61 +16,35 @@ use crate::analyzer::analyzer::{
     get_analyzer_settings, set_analyzer_fen, set_engine_option, start_analyzer_thread,
     stop_analyzer,
 };
-use crate::analyzer::analyzer::{AnalyzerController, EngineCommand};
+use crate::analyzer::analyzer::AnalyzerController;
 use crate::analyzer::board_interactions::{get_board_at_index, get_fen};
 use crate::database::create::create_database;
+use crate::database::create::delete_game;
 use crate::database::create::get_game_by_id;
 use crate::database::create::get_game_chat_by_id;
 use crate::database::create::get_game_list;
 use crate::database::create::load_pgn_game;
-use crate::database::integrations::sync_with_chessdotcom;
-use crate::engine::board::{BoardMetaData, EvalResponse, GameResult};
-use crate::engine::serializer::serialize_board;
-use crate::engine::serializer::SerializedBoard;
+use crate::database::integrations::{is_syncing_chessdotcom, sync_with_chessdotcom};
+use crate::engine::board::BoardMetaData;
 use crate::game::controller::save_appgame;
 use crate::game::controller::update_game_state;
-use crate::game::controller::GameController;
 use crate::game::controller::SerializedGameController;
 use crate::game::controller::{change_gamemode, end_game, get_share_data, new_game, start_game};
+use crate::game::puzzle::get_puzzle;
+use crate::server::server::get_player_stats;
 use crate::server::server::Settings;
-use crate::server::server::{get_system_information, load_settings};
-// Added PvLineData
+use crate::server::server::get_system_information;
 use crate::ai::message::send_llm_request;
 
 use crate::{
-    engine::board,
-    engine::{board::PieceMoves, Board, PieceColor, PieceType},
+    engine::Board,
     server::server::ServerState,
 };
-use std::collections::BTreeMap;
-use std::time::Duration;
-use stockfish::EngineOutput;
-use stockfish::Stockfish;
-use tauri::{AppHandle, Builder, Emitter, Manager, Window};
+use tauri::Manager;
 
-fn make_engine_move(state: &mut ServerState, fen: String) -> Option<String> {
-    let engine = &mut state.engine;
-    match engine {
-        Some(engine) => {
-            engine
-                .set_fen_position(&fen)
-                .inspect_err(|e| eprintln!("{e}"))
-                .ok();
-            let engine_output = engine.go().inspect_err(|e| eprintln!("{e}")).ok();
-            match engine_output {
-                Some(engine_output) => {
-                    let uci_move = engine_output.best_move();
-                    return Some(uci_move.into());
-                }
-                None => None,
-            }
-        }
-        None => None,
-    }
-}
 #[tauri::command]
 fn get_game_board(state: tauri::State<'_, Mutex<ServerState>>) -> SerializedGameController {
-    let mut state = state.lock().unwrap();
+    let state = state.lock().unwrap();
     let game = state.game_controller.serialize();
     game
 }
@@ -94,7 +61,7 @@ fn board_fen(board: Board) -> String {
 }
 
 #[tauri::command]
-fn fetch_game_history() -> Vec<BoardMetaData> {
+fn fetch_game_history() -> Vec<(i64, BoardMetaData)> {
     match get_game_list() {
         Ok(list) => list,
         Err(e) => {
@@ -128,7 +95,7 @@ fn fetch_game(state: tauri::State<'_, Mutex<ServerState>>, id: usize) -> Analyze
     match get_game_by_id(id) {
         Ok(list) => {
             let mut analyzer = AnalyzerController::default();
-            let move_count = list.move_list.len();
+            let _move_count = list.move_list.len();
             let mut board = Board::from(&list.starting_position);
             board.meta_data = list; // includes full move_list from DB
             analyzer.board = board;
@@ -138,7 +105,6 @@ fn fetch_game(state: tauri::State<'_, Mutex<ServerState>>, id: usize) -> Analyze
 
             // Persist so do_move/undo_move operate on the same instance
             state.analyzer_controller = analyzer.clone();
-            println!("Game chat has id {}", analyzer.chat_history.chat_id);
             analyzer
         }
         Err(e) => {
@@ -149,14 +115,14 @@ fn fetch_game(state: tauri::State<'_, Mutex<ServerState>>, id: usize) -> Analyze
 }
 #[tauri::command]
 fn get_settings(state: tauri::State<'_, Mutex<ServerState>>) -> Settings {
-    let mut state = state.lock().unwrap();
+    let state = state.lock().unwrap();
     return state.settings.clone();
 }
 #[tauri::command]
 fn update_settings(state: tauri::State<'_, Mutex<ServerState>>, key: String, val: String) {
     let mut state = state.lock().unwrap();
     state.settings.update(key, val);
-    state.settings.save();
+    let _ = state.settings.save();
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -164,27 +130,19 @@ pub fn run() {
         // Initialize state with default (None channels)
         .manage(Mutex::new(ServerState::default()))
         .setup(|app| {
-            println!("[DEBUG] Creating database...");
 
-            create_database();
-            println!("[DEBUG] Initializing system info...");
+            let _ = create_database();
             let mut sys = System::new_all();
             sys.refresh_all();
             let mem_bytes = sys.total_memory();
             let nb_cpu = sys.cpus().len();
             let ram_capacity = (mem_bytes / 1024 / 1024) as f64 / 1024.0;
-            println!(
-                "[DEBUG] System RAM: {:.2} GB, CPUs: {}",
-                ram_capacity, nb_cpu
-            );
 
             // Get AppHandle
             let handle = app.handle().clone();
-            println!("[DEBUG] App handle acquired.");
 
             // Start thread with handle
             let (tx, rx) = start_analyzer_thread(handle);
-            println!("[DEBUG] Analyzer thread started.");
 
             // Update state with channels
             let state = app.state::<Mutex<ServerState>>();
@@ -193,7 +151,6 @@ pub fn run() {
             state.analyzer_rx = Some(rx);
             state.total_memory = ram_capacity;
             state.nbcpu = nb_cpu;
-            println!("[DEBUG] ServerState updated with analyzer channels, RAM, and CPU info.");
 
             Ok(())
         })
@@ -225,6 +182,10 @@ pub fn run() {
             new_game,
             save_appgame,
             get_share_data,
+            get_puzzle,
+            get_player_stats,
+            delete_game,
+            is_syncing_chessdotcom
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

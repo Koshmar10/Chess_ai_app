@@ -11,9 +11,8 @@ export function SettingsPanel() {
         }
         loadSettings();
     }, [])
-    const handleInputUdate = (setting: string, val: string) => {
+    const handleInputUpdate = (setting: string, val: string) => {
         invoke('update_settings', { key: setting, val: val })
-        console.log(val);
     }
 
     return (
@@ -42,7 +41,7 @@ export function SettingsPanel() {
                             }}
                             onBlur={(e) => {
                                 // Persist change on blur
-                                handleInputUdate("chessdotcom_user", e.target.value)
+                                handleInputUpdate("chessdotcom_user", e.target.value)
                             }}
                         />
                     </label>

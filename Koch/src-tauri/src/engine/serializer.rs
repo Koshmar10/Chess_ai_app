@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-// Ensure TerminationBy and GameResult are imported so they can be used in the serialized struct
-
 use crate::analyzer::analyzer::{AnalyzerController, UndoInfo};
-use crate::engine::board::{GamePhase, GameResult, TerminationBy};
-use crate::engine::{Board, PieceColor};
+use crate::engine::board::{GamePhase, GameResult};
+use crate::engine::Board;
 use crate::game::controller::TerminationReason;
 
 // 1. Define the compressed metadata structure

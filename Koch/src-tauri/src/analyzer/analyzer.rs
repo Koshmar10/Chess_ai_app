@@ -1,14 +1,6 @@
-use std::sync::mpsc::{sync_channel, Receiver, RecvError, SyncSender, TryRecvError};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
-use std::{
-    collections::HashMap,
-    fs::OpenOptions,
-    sync::{
-        mpsc::{self, RecvTimeoutError},
-        Mutex,
-    },
-    thread,
-};
+use std::{collections::HashMap, sync::Mutex, thread};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export)]
 pub enum EngineCommand {
@@ -37,10 +29,7 @@ use ts_rs::TS;
 
 use crate::engine::Board;
 use crate::{
-    engine::{
-        serializer::{serialize_analyzer_controller, SerializedAnalyzerController},
-        ChessPiece, PieceColor, PieceType,
-    },
+    engine::{ChessPiece, PieceColor, PieceType},
     server::server::{load_settings, EvalKind, PvLineData, PvObject, ServerState},
 };
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -141,14 +130,14 @@ pub struct AiChatMessage {
 #[ts(export)]
 pub enum LocalMessageRole {
     User,
-    Assistent,
+    Assistant,
 }
 
 impl ToString for LocalMessageRole {
     fn to_string(&self) -> String {
         match self {
             LocalMessageRole::User => "User".to_string(),
-            LocalMessageRole::Assistent => "Assistent".to_string(),
+            LocalMessageRole::Assistant => "Assistant".to_string(),
         }
     }
 }
@@ -156,7 +145,7 @@ impl From<String> for LocalMessageRole {
     fn from(value: String) -> Self {
         match value.as_str() {
             "User" => LocalMessageRole::User,
-            "Assistent" => LocalMessageRole::Assistent,
+            "Assistant" => LocalMessageRole::Assistant,
             _ => LocalMessageRole::User, // fallback/default
         }
     }
@@ -166,7 +155,7 @@ impl From<&str> for LocalMessageRole {
     fn from(value: &str) -> Self {
         match value {
             "User" => LocalMessageRole::User,
-            "Assistent" => LocalMessageRole::Assistent,
+            "Assistant" => LocalMessageRole::Assistant,
             _ => LocalMessageRole::User, // fallback/default
         }
     }
@@ -211,8 +200,8 @@ impl From<rig::completion::Message> for LocalMessage {
     fn from(m: rig::completion::Message) -> Self {
         // Map the fields accordingly
         match m {
-            rig::message::Message::Assistant { id, content } => Self {
-                role: LocalMessageRole::Assistent,
+            rig::message::Message::Assistant { id: _, content } => Self {
+                role: LocalMessageRole::Assistant,
                 content: content
                     .iter()
                     .map(|cont| match cont {
@@ -242,7 +231,7 @@ impl From<LocalMessage> for rig::completion::Message {
     fn from(value: LocalMessage) -> Self {
         match value.role {
             LocalMessageRole::User => rig::completion::Message::user(value.content),
-            LocalMessageRole::Assistent => rig::completion::Message::assistant(value.content),
+            LocalMessageRole::Assistant => rig::completion::Message::assistant(value.content),
         }
     }
 }
@@ -301,13 +290,12 @@ pub fn start_analyzer_thread(
     app_handle: AppHandle,
 ) -> (SyncSender<EngineCommand>, Receiver<PvObject>) {
     let (cmd_tx, cmd_rx) = sync_channel::<EngineCommand>(64);
-    let (pv_tx, pv_rx) = sync_channel::<PvObject>(8);
+    let (_pv_tx, pv_rx) = sync_channel::<PvObject>(8);
 
     thread::spawn(move || {
         let stockfish_go_config = String::from("go depth 40 movetime 20000");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            println!("[Analyzer] Thread starting...");
-            let mut engine = match Stockfish::new("/usr/bin/stockfish") {
+            let mut engine = match Stockfish::new(crate::etc::DEFAULT_STOCKFISH_PATH) {
                 Ok(e) => e,
                 Err(e) => {
                     eprintln!("[Analyzer] Failed to start engine: {e}");
@@ -316,6 +304,7 @@ pub fn start_analyzer_thread(
             };
 
             let mut is_searching = false;
+            #[allow(unused_assignments)]
             let mut current_fen = String::new();
             let mut current_pv = PvObject::default();
             let mut color_multiplier: i32 = 1; // <- NEW: multiplier for eval (white perspective)
@@ -370,7 +359,7 @@ pub fn start_analyzer_thread(
                                 engine.ensure_ready().ok();
 
                                 match engine.set_fen_position(&fen) {
-                                    Ok(_) => println!("[Analyzer] FEN set successfully: {}", &fen),
+                                    Ok(_) => {}
                                     Err(e) => eprintln!("[Analyzer] Failed to set FEN: {}", e),
                                 }
                                 current_fen = fen;
@@ -386,7 +375,9 @@ pub fn start_analyzer_thread(
                                 engine.ensure_ready().ok();
                                 match engine.uci_send(&stockfish_go_config).ok() {
                                     Some(_) => is_searching = true,
-                                    None => eprintln!("[Analyzer] fif not sbt stockfish go ocngic"),
+                                    None => {
+                                        eprintln!("[Analyzer] Failed to send stockfish go config")
+                                    }
                                 };
                             }
                             EngineCommand::Stop => {
@@ -407,7 +398,7 @@ pub fn start_analyzer_thread(
                                 engine.ensure_ready().ok();
                                 //position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1  moves e2e4 g7g6 d2d4 f8g7s
                                 match engine.uci_send(&fen) {
-                                    Ok(_) => println!("[Analyzer] FEn Set: {}", &fen),
+                                    Ok(_) => {}
                                     Err(e) => eprintln!("{e}"),
                                 };
                                 current_fen = fen;
@@ -433,11 +424,9 @@ pub fn start_analyzer_thread(
 
                                 // 1. Spawning a NEW thread for the transient engine
                                 thread::spawn(move || {
-                                    println!("[Analyzer] Starting background threat search...");
-
                                     // 2. This engine is TOTALLY SEPARATE from the main one
                                     if let Ok(mut temp_engine) =
-                                        Stockfish::new("/usr/bin/stockfish")
+                                        Stockfish::new(crate::etc::DEFAULT_STOCKFISH_PATH)
                                     {
                                         temp_engine.set_fen_position(&flipped_fen).ok();
 
@@ -445,7 +434,6 @@ pub fn start_analyzer_thread(
                                         match temp_engine.go() {
                                             Ok(out) => {
                                                 let threat_move = out.best_move();
-                                                println!("[Analyzer]THreat foun {}", threat_move);
                                                 // Update the global state and UI
                                                 if let Ok(mut global_state) = app_handle_clone
                                                     .state::<Mutex<ServerState>>()
@@ -466,9 +454,7 @@ pub fn start_analyzer_thread(
                             EngineCommand::SetHashSize(hash) => {
                                 engine.ensure_ready().ok();
                                 match engine.set_option("Hash", &hash.to_string()) {
-                                    Ok(_) => {
-                                        println!("[Analyzer] Set Hash to {} success", hash)
-                                    }
+                                    Ok(_) => {}
                                     Err(e) => {
                                         eprintln!("[Analyzer] Set Hash to {} failed: {}", hash, e)
                                     }
@@ -477,9 +463,7 @@ pub fn start_analyzer_thread(
                             EngineCommand::SetMultiPv(cnt) => {
                                 engine.ensure_ready().ok();
                                 match engine.set_option("MultiPV", &cnt.to_string()) {
-                                    Ok(_) => {
-                                        println!("[Analyzer] Set MultiPV to {} success", cnt)
-                                    }
+                                    Ok(_) => {}
                                     Err(e) => {
                                         eprintln!("[Analyzer] Set MultiPV to {} failed: {}", cnt, e)
                                     }
@@ -488,9 +472,7 @@ pub fn start_analyzer_thread(
                             EngineCommand::SetThreads(tcnt) => {
                                 engine.ensure_ready().ok();
                                 match engine.set_option("Threads", &tcnt.to_string()) {
-                                    Ok(_) => {
-                                        println!("[Analyzer] Set Threads to {} success", tcnt)
-                                    }
+                                    Ok(_) => {}
                                     Err(e) => eprintln!(
                                         "[Analyzer] Set Threads to {} failed: {}",
                                         tcnt, e
@@ -506,7 +488,7 @@ pub fn start_analyzer_thread(
                 // Read Stockfish output, log each line
                 if is_searching {
                     if last_clock_tick.elapsed() >= Duration::from_secs(1) {
-                        let uptime = start_time.elapsed().as_secs_f64();
+                        let _uptime = start_time.elapsed().as_secs_f64();
                         //println!("[Analyzer][clock={uptime:.3}s] Searching...");
                         last_clock_tick = Instant::now();
                     }
@@ -571,11 +553,6 @@ pub fn start_analyzer_thread(
                                 eval_value: score_value * color_multiplier,
                             };
                             current_pv.lines.insert(multipv_idx, line_data);
-                            if let Ok(mut global_state) =
-                                app_handle.state::<Mutex<ServerState>>().lock()
-                            {
-                                global_state.analyzer_controller.last_pv = Some(current_pv.clone());
-                            }
                             let _ = app_handle.emit("pv_update", current_pv.clone());
                         }
                     }
@@ -583,7 +560,6 @@ pub fn start_analyzer_thread(
                     thread::sleep(Duration::from_millis(10));
                 }
             }
-            println!("[Analyzer] Thread exited normally");
         }));
 
         if let Err(e) = result {
@@ -647,7 +623,6 @@ pub fn try_analyzer_move(
 #[tauri::command]
 pub fn set_analyzer_fen(state: tauri::State<'_, Mutex<ServerState>>, current_move: isize) -> bool {
     let state = state.lock().unwrap();
-    println!("Called set fen for{}", current_move);
 
     let start_fen = state
         .analyzer_controller
@@ -731,7 +706,6 @@ pub fn set_engine_option(
             EngineOption::Hash => match value.parse::<usize>() {
                 Ok(hash_size) => match tx.send(EngineCommand::SetHashSize(hash_size)) {
                     Ok(_) => {
-                        println!("[Analyzer] Set HashSize to {} sent successfully", hash_size);
                         state
                             .settings
                             .update("HashSize".to_string(), value.to_string());
@@ -746,10 +720,6 @@ pub fn set_engine_option(
             EngineOption::Threads => match value.parse::<usize>() {
                 Ok(thread_count) => match tx.send(EngineCommand::SetThreads(thread_count)) {
                     Ok(_) => {
-                        println!(
-                            "[Analyzer] Set Threads to {} sent successfully",
-                            thread_count
-                        );
                         state
                             .settings
                             .update("Threads".to_string(), value.to_string());
@@ -764,7 +734,6 @@ pub fn set_engine_option(
             EngineOption::MultiPv => match value.parse::<usize>() {
                 Ok(pv_count) => match tx.send(EngineCommand::SetMultiPv(pv_count)) {
                     Ok(_) => {
-                        println!("[Analyzer] Set MultiPv to {} sent successfully", pv_count);
                         state
                             .settings
                             .update("MultiPV".to_string(), value.to_string());
@@ -783,7 +752,7 @@ pub fn set_engine_option(
 pub fn get_analyzer_settings(
     state: tauri::State<'_, Mutex<ServerState>>,
 ) -> Option<(usize, usize, usize)> {
-    let mut state = state.lock().unwrap();
+    let state = state.lock().unwrap();
     let pvs = match state.settings.map.get("MultiPV") {
         Some(val) => match val.parse::<usize>() {
             Ok(v) => v,
@@ -807,7 +776,7 @@ pub fn get_analyzer_settings(
     };
     Some((pvs, th, hs))
 }
-fn flip_fen_turn(fen: &str) -> String {
+pub fn flip_fen_turn(fen: &str) -> String {
     let mut parts: Vec<&str> = fen.split_whitespace().collect();
     if parts.len() > 1 {
         // Switch 'w' to 'b' or 'b' to 'w'
@@ -826,7 +795,7 @@ pub fn drain_until_bestmove(engine: &mut Stockfish) {
 }
 #[tauri::command]
 pub fn get_threat(state: tauri::State<'_, Mutex<ServerState>>) {
-    let mut state = state.lock().unwrap();
+    let state = state.lock().unwrap();
     let fen = state.analyzer_controller.board.to_string();
     let multiplier: i32 = if fen.contains('w') { 1 } else { -1 };
 

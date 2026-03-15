@@ -1,37 +1,5 @@
-import { useState } from "react"
-import { removeDefaultForButton } from "../../App";
-import { ChessPawn, ChessKnight, ChessBishop, ChessRook, ChessQueen, ChessKing } from "lucide-react";
-import { Board } from "../../../src-tauri/bindings/Board";
 import { PieceType } from "../../../src-tauri/bindings/PieceType";
 import { PieceColor } from "../../../src-tauri/bindings/PieceColor";
-
-type PanelOptions = "moves" | "playerInfo"
-const pieceIconColor = "#FFD6E0"; // Light pink, contrasts well with dark red
-
-// Remove static mock taken arrays – now generated from board state
-// const whiteTaken = [...]
-// const blackTaken = [...]
-
-// Map piece kind + color to an icon
-function pieceToIcon(kind: string, _color: string) {
-    const commonProps = { color: pieceIconColor, size: 20 };
-    switch (kind) {
-        case "Pawn":
-            return <ChessPawn {...commonProps} />;
-        case "Knight":
-            return <ChessKnight {...commonProps} />;
-        case "Bishop":
-            return <ChessBishop {...commonProps} />;
-        case "Rook":
-            return <ChessRook {...commonProps} />;
-        case "Queen":
-            return <ChessQueen {...commonProps} />;
-        case "King":
-            return <ChessKing {...commonProps} />;
-        default:
-            return null;
-    }
-}
 
 interface Props {
     blackTaken: [PieceType, PieceColor][];
@@ -40,15 +8,6 @@ interface Props {
     moveList: string[];
 }
 export function PveLeftPanel({ moveList, opening }: Props) {
-    const [selectedPanelOption, setSelectedPanelOption] = useState<PanelOptions>("playerInfo")
-
-    const tabClass = (key: PanelOptions) => {
-        const base = `${removeDefaultForButton} w-full py-2 text-sm tracking-wide transition-colors`;
-        const selected = key === selectedPanelOption;
-        return selected
-            ? `${base} bg-secondary/15 text-secondary border-secondary/30`
-            : `${base} text-secondary/70 hover:bg-secondary/10`;
-    };
 
     return (
         <div className="flex flex-col left-panel w-[25%] h-full bg-card-dark/45 border-l border-border-dark">

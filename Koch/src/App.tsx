@@ -1,9 +1,8 @@
-import { SetStateAction, useState } from "react";
+import { useState } from "react";
 
 import "./App.css";
 import { Sidebar } from "./components/Sidebar";
 import { CenterSection } from "./components/CenterSection";
-import { NotificationManager } from "./components/notifications/NotificationManager";
 
 export type AppScreen = "Home" | "Analyzer" | "History" | "Pve" | "Settings" | "Puzzle";
 export const removeDefaultForButton = "border-0 p-0 m-0 appearance-none focus:outline-none"

@@ -1,5 +1,5 @@
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Flame, Lightbulb, Target } from "lucide-react";
-import { Dispatch, SetStateAction, useState } from "react";
+import { Dispatch, SetStateAction } from "react";
 import { EngineData } from "./EngineData";
 import { PvObject } from "../../../src-tauri/bindings/PvObject";
 
@@ -57,8 +57,9 @@ export function AnalyzerInputs({
     return (
         <div className="analyzer-inputs flex flex-col justify-start items-start gap-4 mx-4 w-full max-w-[160px]"
             style={{ height: `${height}px` }}>
-
+            
             <div className="flex flex-col w-full gap-2">
+                {/* <div className="bg-red-100"><FlipVertical className="text-white" /></div> */}
                 <p className="text-foreground-dark/70 text-xs">Navigation</p>
                 <div className="flex flex-row justify-center w-full gap-2">
                     {/* First */}

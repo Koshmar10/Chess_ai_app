@@ -1,4 +1,4 @@
-use std::{fs, sync::Mutex};
+use std::sync::Mutex;
 
 use chrono::{Datelike, Local};
 use reqwest::Client;
@@ -23,18 +23,18 @@ async fn get_chessdotcom_games(
     let current_year = now.year();
     let current_month = now.month();
     let url = format!(
-        "https://api.chess.com/pub/player/{}/games/{current_year}/09",
-        chessdotcom_user
+        "https://api.chess.com/pub/player/{}/games/{current_year}/{:02}",
+        chessdotcom_user, current_month
     );
     let client = Client::builder()
         .user_agent(user_agent) // This is the magic line
         .build()?;
-    println!("{}", &url);
-    //let response = client.get(url).send().await?;
-    //let text = response.text().await?;
+
+    let response = client.get(url).send().await?;
+    let text = response.text().await?;
     //println!("Successfully fetched response: {}", &text);
-    let text =
-        fs::read_to_string("/home/petru/storage/Projects/chess_app/Koch/src-tauri/src/games.json")?;
+    // let text =
+    //     fs::read_to_string("/home/petru/storage/Projects/chess_app/Koch/src-tauri/src/games.json")?;
     Ok(text)
 }
 fn load_chessdotcom_games(
@@ -42,25 +42,39 @@ fn load_chessdotcom_games(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let games_data: ChessDotComGames = serde_json::from_str(&chessdotcom_api_response)?;
     for game in &games_data.games {
-        load_pgn_game(game.pgn.clone())?;
+        match load_pgn_game(game.pgn.clone()) {
+            Ok(_) => {}
+            Err(_e) => {}
+        };
     }
     Ok(())
 }
 #[tauri::command]
 pub async fn sync_with_chessdotcom(
-    state: tauri::State<'_, Mutex<ServerState<'_>>>,
+    state: tauri::State<'_, Mutex<ServerState>>,
 ) -> Result<(), String> {
     // Lock only to extract the username, then drop the lock before await
     let chessdotcom_user = {
-        let state = state.lock().map_err(|e| e.to_string())?;
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        state.syncing_with_chessdotcom = true;
         match state.settings.map.get("chessdotcom_user") {
             Some(cu) => cu.clone(),
-            None => return Err("nu chieie in setari".to_string()),
+            None => return Err("chessdotcom_user not found in settings".to_string()),
         }
     };
     let api_response = get_chessdotcom_games(&chessdotcom_user)
         .await
         .map_err(|e| e.to_string())?;
     load_chessdotcom_games(&api_response).map_err(|e| e.to_string())?;
+
+    {
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        state.syncing_with_chessdotcom = false;
+    }
     Ok(())
+}
+#[tauri::command]
+pub fn is_syncing_chessdotcom(state: tauri::State<'_, Mutex<ServerState>>) -> bool {
+    let syncing = state.lock().unwrap().syncing_with_chessdotcom;
+    return syncing;
 }

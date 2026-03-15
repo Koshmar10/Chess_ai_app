@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use crate::engine::{Board, PieceColor, PieceType};
+use crate::engine::Board;
 
 impl Board {
     /// Decode a UCI move string into board coordinates (from, to).

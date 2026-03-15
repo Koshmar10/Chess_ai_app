@@ -1,5 +1,4 @@
 import { Bot, Pin } from "lucide-react";
-import { mockMessages } from "../mock";
 import { useRef, useState, useEffect } from "react";
 
 import { UiAiChatMessage } from "./Analyzer";
@@ -33,8 +32,8 @@ export const MessageText = ({
     onSquareLeave,
     onMoveEnter,
     onMoveLeave,
-    mv_index,
-    fetchIndex,
+    mv_index: _mv_index,
+    fetchIndex: _fetchIndex,
     allow_hover,
 }: MessageTextProps) => {
     const parts = text.split(/(<mv>.*?<\/mv>|<sq>.*?<\/sq>|\*\*.*?\*\*)/g);

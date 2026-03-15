@@ -1,5 +1,4 @@
-import React, { Dispatch, SetStateAction, useEffect, useState } from "react";
-import { GameResult } from "../../../src-tauri/bindings/GameResult";
+import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { BoardMetaData } from "../../../src-tauri/bindings/BoardMetaData";
 import { invoke } from "@tauri-apps/api/core";
 import { GameCard } from "./GameCard";

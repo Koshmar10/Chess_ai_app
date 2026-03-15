@@ -114,16 +114,17 @@ impl Board {
         true
     }
 
-    pub fn has_lost(&mut self) -> bool {
-        // route through corrected names
-        self.is_checkmate() || self.is_stalemate() || self.halfmove_clock == 50
+    /// Returns true when the game has ended for any reason:
+    /// checkmate, stalemate, or the 50-move rule (100 half-moves).
+    pub fn is_game_over(&mut self) -> bool {
+        self.is_checkmate() || self.is_stalemate() || self.halfmove_clock >= 100
     }
     pub fn get_termination_reason(&mut self) -> Option<TerminationReason> {
         if self.is_checkmate() {
             Some(TerminationReason::Checkmate)
         } else if self.is_stalemate() {
             Some(TerminationReason::StaleMate)
-        } else if self.halfmove_clock == 50 {
+        } else if self.halfmove_clock >= 100 {
             Some(TerminationReason::Draw)
         } else {
             None

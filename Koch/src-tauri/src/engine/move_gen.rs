@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use crate::engine::{
-    board::{CastleType, PieceMoves},
-    piece, Board, ChessPiece, PieceColor, PieceType,
-};
+use crate::engine::{board::PieceMoves, Board, ChessPiece, PieceColor, PieceType};
 use ts_rs::TS;
 pub enum VerticalDirection {
     Up,
@@ -93,7 +90,7 @@ impl Board {
         let captures = self.filter_capture_moves(piece, &moves);
         let captures = self.legalize_capture_moves(piece, captures);
 
-        let attacks = self.get_attack_squares(piece);
+        let _attacks = self.get_attack_squares(piece);
 
         //Treat caslte rights for piece
         match piece.kind {
@@ -170,33 +167,38 @@ impl Board {
                 }
 
                 let mut queenside_free = true;
-                for travel_square in queen_travel_squares {
-                    match self.squares[travel_square.0 as usize][travel_square.1 as usize] {
-                        Some(_) => {
-                            queenside_free = false;
-                            break;
+                // b8 (0,1) must be empty for the rook to pass through
+                if self.squares[0][1].is_some() {
+                    queenside_free = false;
+                }
+                if queenside_free {
+                    for travel_square in queen_travel_squares {
+                        match self.squares[travel_square.0 as usize][travel_square.1 as usize] {
+                            Some(_) => {
+                                queenside_free = false;
+                                break;
+                            }
+                            None => {}
                         }
-                        None => {}
-                    }
 
-                    for row in &self.squares {
-                        for sq in row {
-                            if let Some(enemy_piece) = sq {
-                                if enemy_piece.color != color {
-                                    let attacks = self.get_attack_squares(enemy_piece);
-                                    if attacks.contains(&travel_square) {
-                                        queenside_free = false;
-                                        break;
+                        for row in &self.squares {
+                            for sq in row {
+                                if let Some(enemy_piece) = sq {
+                                    if enemy_piece.color != color {
+                                        let attacks = self.get_attack_squares(enemy_piece);
+                                        if attacks.contains(&travel_square) {
+                                            queenside_free = false;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if !queenside_free {
-                            break;
+                            if !queenside_free {
+                                break;
+                            }
                         }
                     }
                 }
-                //check if is check or if any travel squares are affected
 
                 can_castle_king_side =
                     can_castle_king_side && self.black_small_castle && kingside_free;
@@ -277,29 +279,35 @@ impl Board {
 
                 // queenside path free and not attacked
                 let mut queenside_free = true;
-                for travel_square in queen_travel_squares {
-                    match self.squares[travel_square.0 as usize][travel_square.1 as usize] {
-                        Some(_) => {
-                            queenside_free = false;
-                            break;
+                // b1 (7,1) must be empty for the rook to pass through
+                if self.squares[7][1].is_some() {
+                    queenside_free = false;
+                }
+                if queenside_free {
+                    for travel_square in queen_travel_squares {
+                        match self.squares[travel_square.0 as usize][travel_square.1 as usize] {
+                            Some(_) => {
+                                queenside_free = false;
+                                break;
+                            }
+                            None => {}
                         }
-                        None => {}
-                    }
 
-                    for row in &self.squares {
-                        for sq in row {
-                            if let Some(enemy_piece) = sq {
-                                if enemy_piece.color != color {
-                                    let attacks = self.get_attack_squares(enemy_piece);
-                                    if attacks.contains(&travel_square) {
-                                        queenside_free = false;
-                                        break;
+                        for row in &self.squares {
+                            for sq in row {
+                                if let Some(enemy_piece) = sq {
+                                    if enemy_piece.color != color {
+                                        let attacks = self.get_attack_squares(enemy_piece);
+                                        if attacks.contains(&travel_square) {
+                                            queenside_free = false;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if !queenside_free {
-                            break;
+                            if !queenside_free {
+                                break;
+                            }
                         }
                     }
                 }
@@ -523,7 +531,7 @@ impl Board {
                 let (r, c) = (piece.position.0 as i8, piece.position.1 as i8);
 
                 // Pawns attack diagonally - use directions with POV logic
-                let mut direction = if piece.color == PieceColor::White {
+                let direction = if piece.color == PieceColor::White {
                     -1
                 } else {
                     1

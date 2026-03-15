@@ -1,4 +1,4 @@
-use crate::engine::{board::CastleType, Board, ChessPiece, PieceType};
+use crate::engine::{Board, ChessPiece, PieceType};
 
 impl Board {
     pub fn filter_capture_moves(&self, piece: &ChessPiece, moves: &Vec<(u8, u8)>) -> Vec<(u8, u8)> {

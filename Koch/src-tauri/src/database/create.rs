@@ -1,28 +1,18 @@
 use crate::analyzer::analyzer::{LocalChat, LocalMessage, LocalMessageRole};
-use crate::engine::board::{
-    self, BoardMetaData, EvalResponse, EvalType, GameResult, MoveStruct, TerminationBy,
-};
+use crate::engine::board::{BoardMetaData, GameResult, MoveStruct};
 use crate::engine::{Board, PieceType};
-use crate::game;
 use crate::game::controller::TerminationReason;
+use crate::server::server::load_opening_index;
 use regex::Regex;
 use rusqlite::{params, Connection, Result};
 
-#[derive(Debug, Clone)]
-pub struct PgnGame(String);
-/*
-impl PgnGame {
-    pub fn new(s: String) -> Result<Self, String> {
-
-}
-}
-*/
 pub fn create_database() -> Result<()> {
     let con = Connection::open("chess.db")?;
 
     con.execute(
         "CREATE TABLE IF NOT EXISTS games (
             game_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_hash TEXT UNIQUE NOT NULL,
             date_played TEXT,            
             white_player TEXT NOT NULL,
             black_player TEXT NOT NULL,
@@ -32,6 +22,7 @@ pub fn create_database() -> Result<()> {
             opening TEXT NOT NULL,
             time_control TEXT,
             pgn_data TEXT NOT NULL
+            
         );",
         (),
     )?;
@@ -65,9 +56,9 @@ pub fn create_database() -> Result<()> {
 }
 
 pub fn destroy_database() {
-    let con = Connection::open("chess.db").unwrap();
-
-    con.execute("DROP TABLE IF EXISTS games", ()).unwrap();
+    if let Ok(con) = Connection::open("chess.db") {
+        let _ = con.execute("DROP TABLE IF EXISTS games", ());
+    }
 }
 
 // Helper: parse result string ("1-0","0-1","1/2-1/2","---") into GameResult
@@ -108,73 +99,58 @@ fn set_tag(metadata: &mut BoardMetaData, tag: String, value: String) {
     match tag.as_str() {
         "Event" => {
             metadata.event = Some(value.clone());
-            println!("Set Event: {}", value);
         }
         "Site" => {
             metadata.site = Some(value.clone());
-            println!("Set Site: {}", value);
         }
         "Date" => {
             metadata.date = value.clone();
-            println!("Set Date: {}", value);
         }
         "Round" => {
             metadata.round = Some(value.clone());
-            println!("Set Round: {}", value);
         }
         "White" => {
             metadata.white_player_name = value.clone();
-            println!("Set White: {}", value);
         }
         "Black" => {
             metadata.black_player_name = value.clone();
-            println!("Set Black: {}", value);
         }
         "Result" => {
             metadata.result = GameResult::from(value.as_str());
-            println!("Set Result: {}", value);
         }
         "WhiteElo" => {
             metadata.white_player_elo = value.parse::<u32>().unwrap_or(1);
-            println!("Set WhiteElo: {}", value);
         }
         "BlackElo" => {
             metadata.black_player_elo = value.parse::<u32>().unwrap_or(1);
-            println!("Set BlackElo: {}", value);
         }
         "TimeControl" => {
             metadata.time_control = Some(value.clone());
-            println!("Set TimeControl: {}", value);
         }
         "Termination" => {
             metadata.termination = parse_termination(&value);
-            println!("Set Termination: {}", value);
         }
         "ECO" => {
             metadata.eco = Some(value.clone());
-            println!("Set ECO: {}", value);
         }
         "Opening" => {
             metadata.opening = Some(value.clone());
-            println!("Set Opening: {}", value);
         }
         "EndTime" => {
             metadata.end_time = Some(value.clone());
-            println!("Set EndTime: {}", value);
         }
         "Link" => {
             metadata.link = Some(value.clone());
-            println!("Set Link: {}", value);
         }
         _ => {}
     }
 }
 pub fn normalize_pgn(pgn_data: String) -> String {
-    let mut elipsis_re = Regex::new(r"(\d+\.\.\.)").unwrap();
+    let elipsis_re = Regex::new(r"(\d+\.\.\.)").unwrap();
     let normalized_pgn = elipsis_re.replace_all(&pgn_data, "").to_string();
     normalized_pgn
 }
-fn parse_pgn_string(s: String) -> BoardMetaData {
+pub fn parse_pgn_string(s: String) -> BoardMetaData {
     let mut clocks: Vec<String> = Vec::new();
     let mut timestamps: Vec<u32> = Vec::new();
     let s = normalize_pgn(s);
@@ -183,7 +159,10 @@ fn parse_pgn_string(s: String) -> BoardMetaData {
     let mut translation_board = Board::from(&metadata.starting_position);
     let pgn_lines: Vec<String> = s.lines().map(|line| line.to_string()).collect();
 
-    for (i, line) in pgn_lines.iter().enumerate() {
+    //opening index open
+    let opening_index = load_opening_index();
+
+    for (_i, line) in pgn_lines.iter().enumerate() {
         let line = line.trim();
 
         if line.starts_with('[') && line.ends_with(']') {
@@ -200,10 +179,6 @@ fn parse_pgn_string(s: String) -> BoardMetaData {
 
                 set_tag(&mut metadata, tag, value);
             } else {
-                println!(
-                    "  Warning: Could not split tag line properly: '{}'",
-                    trimed_line
-                );
             }
         } else {
             if line.is_empty() {
@@ -233,7 +208,6 @@ fn parse_pgn_string(s: String) -> BoardMetaData {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    println!("{:?}", &move_pairs);
     let mut ct_c = 0;
     let mut moves: Vec<MoveStruct> = Vec::new();
     let mut move_counter = 1;
@@ -268,48 +242,40 @@ fn parse_pgn_string(s: String) -> BoardMetaData {
 
         for (i, mv) in pair_moves.iter().enumerate() {
             if mv.is_empty() {
-                println!("  Skipping empty move string at move pair index {}", i);
                 continue;
             }
-            println!("  Parsing move {}: '{}'", i, mv);
-            let mut uci = translation_board.san_to_uci(mv).unwrap_or_else(|e| {
-                println!("    Failed to convert SAN '{}' to UCI: {:?}", mv, e);
-                "".to_string()
-            });
+
+            let mut uci = translation_board
+                .san_to_uci(mv)
+                .unwrap_or_else(|_e| "".to_string());
             if !&uci.is_empty() {
-                println!("    SAN '{}' translated to UCI '{}'", mv, uci);
                 let sqs = translation_board.decode_uci_move(&uci);
                 match sqs {
                     Some((from, to, promotion)) => {
-                        println!(
-                            "    Decoded UCI '{}' to squares: from {:?}, to {:?}",
-                            uci, from, to
-                        );
                         match translation_board.move_piece(from, to, promotion) {
                             Ok(_) => {
-                                println!(
-                                    "    Successfully moved piece from {:?} to {:?}",
-                                    from, to
-                                );
+                                let mut opening: Option<String> = None;
+
+                                match opening_index {
+                                    Some(ref oi) => match oi.get(&translation_board.to_string()) {
+                                        Some(re) => opening = Some(re.name.clone()),
+                                        None => {}
+                                    },
+                                    None => {}
+                                }
+                                if opening.is_some() {
+                                    translation_board.meta_data.opening = opening.clone();
+                                    translation_board.meta_data.opening = opening;
+                                }
                             }
-                            Err(e) => {
-                                println!(
-                                    "    Move translation went wrong or invalid move: {:?}",
-                                    e
-                                );
-                            }
+                            Err(_e) => {}
                         }
                     }
                     None => {
-                        println!(
-                            "    Failed to decode UCI move '{}', setting UCI to empty",
-                            uci
-                        );
                         uci = String::new();
                     }
                 }
             } else {
-                println!("    UCI string is empty for SAN '{}'", mv);
             }
             let comment = comments.get(i).cloned();
             let nag = nags.get(i).cloned();
@@ -345,7 +311,7 @@ fn parse_pgn_string(s: String) -> BoardMetaData {
     }
     moves.pop();
     metadata.move_list = moves;
-
+    metadata.opening = translation_board.meta_data.opening.clone();
     //println!("Final metadata: {:?}", &metadata);
     metadata
 }
@@ -464,7 +430,8 @@ pub fn metadata_to_pgn(metadata: &BoardMetaData) -> String {
     pgn
 }
 impl BoardMetaData {
-    pub fn to_pgn(&self) {}
+    pub fn to_pgn(&self) { /* TODO: implement, use metadata_to_pgn() */
+    }
 }
 pub fn get_game(id: usize) -> BoardMetaData {
     let con = Connection::open("chess.db").expect("Failed to open database");
@@ -483,12 +450,20 @@ pub enum SaveType {
     MetaDataSave { data: BoardMetaData },
     GameSave,
 }
-pub fn save_game(metadata: &BoardMetaData) -> Result<(), rusqlite::Error> {
+pub fn save_game(metadata: &BoardMetaData, hash: Option<String>) -> Result<(), rusqlite::Error> {
     let con = Connection::open("chess.db")?;
 
     let pgn_data = metadata_to_pgn(&metadata);
     let time_control = metadata.time_control.clone().unwrap_or_default();
-    println!("Saving to time_control: '{}'", time_control);
+
+    // Compute hash if not provided
+    let game_hash = match hash {
+        Some(h) => h,
+        None => {
+            let hash = blake3::hash(pgn_data.as_bytes());
+            hash.to_string()
+        }
+    };
 
     con.execute(
         "INSERT INTO games (
@@ -500,8 +475,10 @@ pub fn save_game(metadata: &BoardMetaData) -> Result<(), rusqlite::Error> {
             result,
             opening,
             pgn_data,
-            time_control
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            time_control,
+            game_hash
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(game_hash) DO NOTHING",
         rusqlite::params![
             metadata.date,
             metadata.white_player_name,
@@ -511,14 +488,24 @@ pub fn save_game(metadata: &BoardMetaData) -> Result<(), rusqlite::Error> {
             metadata.result.to_string(),
             metadata.opening.clone().unwrap_or_default(),
             pgn_data,
-            time_control
+            time_control,
+            game_hash
         ],
     )?;
 
     Ok(())
 }
+#[tauri::command]
+pub fn delete_game(id: u32) -> Result<(), String> {
+    let conn = Connection::open("chess.db").map_err(|e| e.to_string())?;
+    let _rows_affected = conn
+        .execute("DELETE FROM games WHERE game_id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
 
-pub fn get_game_list() -> Result<Vec<BoardMetaData>, rusqlite::Error> {
+    Ok(())
+}
+
+pub fn get_game_list() -> Result<Vec<(i64, BoardMetaData)>, rusqlite::Error> {
     let con = Connection::open("chess.db")?;
 
     let mut stmt = con.prepare(
@@ -530,7 +517,7 @@ pub fn get_game_list() -> Result<Vec<BoardMetaData>, rusqlite::Error> {
         let mut meta = BoardMetaData::default();
 
         // column indices: 0=game_id,1=date_played,2=white_player,3=black_player,4=result,5=opening,6=pgn_data,7=white_elo,8=black_elo
-        let _game_id: i64 = row.get(0)?;
+        let game_id: i64 = row.get(0)?;
         meta.date = row.get::<_, String>(1)?;
         meta.white_player_name = row.get::<_, String>(2)?;
         meta.black_player_name = row.get::<_, String>(3)?;
@@ -541,19 +528,33 @@ pub fn get_game_list() -> Result<Vec<BoardMetaData>, rusqlite::Error> {
         meta.result = parse_game_result(&result_str);
         meta.opening = row.get::<_, Option<String>>(5)?;
         meta.time_control = row.get::<_, Option<String>>(9)?;
-        Ok(meta)
+        Ok((game_id, meta))
     })?;
 
     let mut games = Vec::new();
     for r in rows {
-        games.push(r?);
+        let (game_id, meta) = r?;
+        games.push((game_id, meta));
     }
     Ok(games)
 }
 #[tauri::command]
 pub fn load_pgn_game(input_string: String) -> Result<(), String> {
+    //premature check the string inside games
+    let input_string_hash = blake3::hash(input_string.clone().as_bytes());
+    let con = Connection::open("chess.db").map_err(|e| e.to_string())?;
+    let mut stmt = con
+        .prepare("SELECT COUNT(*) FROM games WHERE game_hash = ?1")
+        .map_err(|e| e.to_string())?;
+    let count: i64 = stmt
+        .query_row([input_string_hash.clone().to_string()], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if count > 0 {
+        return Err("Game already exists".to_string());
+    }
+
     let metadata = parse_pgn_string(input_string);
-    if let Err(e) = save_game(&metadata) {
+    if let Err(e) = save_game(&metadata, Some(input_string_hash.to_string())) {
         eprintln!("Error saving game: {}", e);
         return Err(e.to_string());
     }
@@ -565,6 +566,7 @@ pub fn get_game_by_id(game_id: usize) -> Result<BoardMetaData, rusqlite::Error> 
     let pgn: String = stmt.query_row([game_id as u32], |row| row.get(0))?;
     Ok(parse_pgn_string(pgn))
 }
+
 pub fn get_game_chat_by_id(game_id: usize) -> Result<LocalChat, rusqlite::Error> {
     //check if chat with this id existis
     let chat = {
@@ -585,7 +587,6 @@ pub fn get_game_chat_by_id(game_id: usize) -> Result<LocalChat, rusqlite::Error>
                 // Get the last inserted chat_id
                 con.last_insert_rowid()
             };
-            println!("Created chat wit id {}", chat_id);
             LocalChat {
                 chat_id: chat_id as i32,
                 chat_messages: Vec::new(),
@@ -620,14 +621,14 @@ pub fn get_game_chat_by_id(game_id: usize) -> Result<LocalChat, rusqlite::Error>
 impl LocalChat {
     pub fn save(&self) -> Result<(), String> {
         let chat_id = self.chat_id;
-        let con = Connection::open("chess.db").map_err(|e| "Failed to open db".to_string())?;
+        let con = Connection::open("chess.db").map_err(|_e| "Failed to open db".to_string())?;
         let mut stmt = con
             .prepare(
                 "Insert into messages (chat_id, role, content, move_index, sent_at) Values (?1, ?2, ?3, ?4, ?5) ON CONFLICT(content) DO NOTHING",
             )
             .map_err(|e| e.to_string())?;
         for chat_message in &self.chat_messages {
-            let res = stmt
+            let _res = stmt
                 .execute((
                     chat_id,
                     chat_message.role.to_string(),

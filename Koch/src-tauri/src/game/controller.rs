@@ -1,10 +1,8 @@
-use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::{Duration, Instant},
 };
-use stockfish::Stockfish;
 use ts_rs::TS;
 
 use crate::{
@@ -14,7 +12,6 @@ use crate::{
         serializer::{serialize_board, SerializedBoard},
         Board, PieceColor, PieceType,
     },
-    make_engine_move,
     server::server::ServerState,
 };
 
@@ -46,9 +43,9 @@ impl From<GameControllerMode> for ChessClock {
 }
 fn format_duration(duration: Duration) -> u32 {
     let total_millis = duration.as_millis();
-    let minutes = (total_millis / 60000) % 60;
-    let seconds = (total_millis / 1000) % 60;
-    let millis = total_millis % 1000;
+    let _minutes = (total_millis / 60000) % 60;
+    let _seconds = (total_millis / 1000) % 60;
+    let _millis = total_millis % 1000;
     (total_millis) as u32
 }
 impl ChessClock {
@@ -109,6 +106,7 @@ pub struct SerializedGameController {
     pub mode: GameControllerMode,
     pub player_card: String,
     pub engine_card: String,
+    pub player_elo: u32,
     pub board: SerializedBoard,
     pub player_clock: u32,
     pub engine_clock: u32,
@@ -129,7 +127,7 @@ impl From<GameControllerMode> for GameController {
         GameController {
             mode,
             player: PieceColor::White,
-            white_name: "Petru".into(),
+            white_name: "Player".into(),
             black_name: "Stockfish".into(),
             white_elo: 500,
             black_elo: 500,
@@ -176,14 +174,15 @@ impl GameController {
             GameControllerMode::Classical => Some("1800".to_string()),
         };
         self.board.meta_data.black_player_elo = self.black_elo as u32;
-        self.board.meta_data.black_player_elo = self.white_elo as u32;
+        self.board.meta_data.white_player_elo = self.white_elo as u32;
         self.board.meta_data.black_player_name = self.black_name.clone();
         self.board.meta_data.white_player_name = self.white_name.clone();
         self.board.rerender_move_cache();
         self.can_be_abandoned = true;
         self.serialize()
     }
-    pub fn export() {}
+    pub fn export() { /* TODO: implement game export */
+    }
     pub fn end_game(
         &mut self,
         reason: TerminationReason,
@@ -264,9 +263,9 @@ impl GameController {
                     mv_struct.clock = Some(format);
                     self.board.meta_data.move_list.push(mv_struct.clone());
                 }
-                Err(e) => println!("Failed to update, invalid move"),
+                Err(_e) => {}
             }
-            if self.board.has_lost() {
+            if self.board.is_game_over() {
                 self.termination_reason = self.board.get_termination_reason();
                 self.state = GameControllerState::Ended;
                 self.result = match self.termination_reason {
@@ -331,18 +330,20 @@ impl GameController {
     }
     pub fn serialize(&self) -> SerializedGameController {
         let (white_clock, black_clock) = self.clock.format();
-        let (player_card, engine_card, player_clock, engine_clock) = match self.player {
+        let (player_card, engine_card, player_clock, engine_clock, player_elo) = match self.player {
             PieceColor::White => (
                 format!("{} ({})", self.white_name, self.white_elo),
                 format!("{} ({})", self.black_name, self.black_elo),
                 white_clock,
                 black_clock,
+                self.white_elo as u32,
             ),
             PieceColor::Black => (
                 format!("{} ({})", self.black_name, self.black_elo),
                 format!("{} ({})", self.white_name, self.white_elo),
                 black_clock,
                 white_clock,
+                self.black_elo as u32,
             ),
         };
         SerializedGameController {
@@ -350,6 +351,7 @@ impl GameController {
             mode: self.mode,
             player_card,
             engine_card,
+            player_elo,
             board: serialize_board(&self.board),
             player_clock,
             engine_clock,
@@ -360,7 +362,8 @@ impl GameController {
             can_be_abandoned: self.can_be_abandoned,
         }
     }
-    pub fn save() {}
+    pub fn save() { /* TODO: implement game save */
+    }
 }
 
 #[tauri::command]
@@ -438,17 +441,9 @@ pub fn update_game_state(
         state_guard.game_controller.board.meta_data.opening = opening.clone();
         serialized.board.meta_data.opening = opening;
     }
-    println!(
-        "{:#?}",
-        state_guard
-            .game_controller
-            .board
-            .meta_data
-            .move_list
-            .clone()
-    );
-    if serialized.elo_gain.is_some() {
-        state_guard.update_elo(serialized.elo_gain.unwrap());
+
+    if let Some(gain) = serialized.elo_gain {
+        state_guard.update_elo(gain);
     }
 
     Ok(serialized)
@@ -462,8 +457,8 @@ pub fn end_game(
 ) -> SerializedGameController {
     let mut state = state.lock().unwrap();
     let serialized = state.game_controller.end_game(reason, loser);
-    if serialized.elo_gain.is_some() {
-        state.update_elo(serialized.elo_gain.unwrap());
+    if let Some(gain) = serialized.elo_gain {
+        state.update_elo(gain);
     }
     serialized
 }
@@ -473,7 +468,8 @@ pub fn new_game(state: tauri::State<'_, Mutex<ServerState>>) -> SerializedGameCo
 
     let default_player_elo = "500".to_string();
     let default_engine_elo = "500".to_string();
-    let (player_elo, engine_elo) = {
+    let default_player_name = "Player".to_string();
+    let (player_elo, engine_elo, player_name) = {
         (
             state
                 .settings
@@ -487,15 +483,23 @@ pub fn new_game(state: tauri::State<'_, Mutex<ServerState>>) -> SerializedGameCo
                 .get("StockfishElo")
                 .unwrap_or(&default_engine_elo)
                 .clone(),
+            state
+                .settings
+                .map
+                .get("PlayerName")
+                .unwrap_or(&default_player_name)
+                .clone(),
         )
     };
     state.game_controller = GameController::new();
     match state.game_controller.player {
         PieceColor::White => {
+            state.game_controller.white_name = player_name;
             state.game_controller.white_elo = player_elo.parse().unwrap_or(500);
             state.game_controller.black_elo = engine_elo.parse().unwrap_or(500);
         }
         PieceColor::Black => {
+            state.game_controller.black_name = player_name;
             state.game_controller.white_elo = engine_elo.parse().unwrap_or(500);
             state.game_controller.black_elo = player_elo.parse().unwrap_or(500);
         }
@@ -541,7 +545,7 @@ pub fn save_appgame(state: tauri::State<'_, Mutex<ServerState>>) -> Result<(), S
         link: state.game_controller.board.meta_data.link.clone(),
         eco: state.game_controller.board.meta_data.eco.clone(),
     };
-    save_game(&metadata).map_err(|e| e.to_string())?;
+    save_game(&metadata, None).map_err(|e| e.to_string())?;
     Ok(())
 }
 #[tauri::command]
@@ -554,56 +558,3 @@ pub fn get_share_data(state: tauri::State<'_, Mutex<ServerState>>) -> (String, S
     };
     (fen, pgn)
 }
-/*
-#[allow(dead_code)]
-fn try_move(
-    state: tauri::State<'_, Mutex<ServerState>>,
-    src_square: (u8, u8),
-    dest_square: (u8, u8),
-    promotion: Option<PieceType>,
-) -> Option<SerializedBoard> {
-    let mut state = state.lock().unwrap();
-
-    // Ensure move cache exists (prevents missing entries for sliding pieces)
-    if state.board.move_cache.is_empty() {
-        state.board.rerender_move_cache();
-    }
-
-    // Capture target BEFORE moving (after move the destination holds the moving piece)
-    let captured_before =
-        state.board.squares[dest_square.0 as usize][dest_square.1 as usize].clone();
-
-    match state.board.move_piece(src_square, dest_square, promotion) {
-        Ok(mut move_struct) => {
-            state.board.meta_data.move_list.push(move_struct);
-            // Refresh move cache after a successful move
-            state.board.rerender_move_cache();
-            match &state.opening_index {
-                Some(op_idx) => {
-                    let fen = &state.board.to_string();
-                    println!("{:?}", &fen);
-                    match op_idx.get(fen) {
-                        None => {}
-                        Some(op) => {
-                            state.board.meta_data.opening = Some(op.name.to_string());
-                            println!("{:?}", &state.board.meta_data.opening)
-                        }
-                    }
-                }
-                None => {}
-            }
-            let sb = serialize_board(&state.board);
-            dbg!(&sb);
-            Some(sb)
-        }
-        Err(err) => {
-            // Optional: log error
-            eprintln!(
-                "Illegal move {:?} -> {:?}: {:?}",
-                src_square, dest_square, err
-            );
-            None
-        }
-    }
-}
-    */

@@ -211,12 +211,6 @@ export function deserialzer(board_data: SerializedBoard): Board {
             link: board_data.meta_data.link ?? null,
             eco: board_data.meta_data.eco ?? null,
         },
-        ui: {
-            pov: "White",
-            white_taken: [],
-            black_taken: [],
-        },
-        been_modified: false,
         next_id: 0,
         ply_count: 0
     };
@@ -266,7 +260,7 @@ export function deserializeAnalyzerController(data: SerializedAnalyzerController
         board_undo: data.board_undo,
         last_threat: null,
         last_pv: null,
-        chat_history: null
+        chat_history: { chat_id: 0, chat_messages: [] }
     }
 }
 export function fileRankToRowCol(square: string): [number, number] {

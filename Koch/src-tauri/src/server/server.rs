@@ -1,21 +1,19 @@
 use crate::analyzer::analyzer::{AnalyzerController, EngineCommand};
-use crate::update_settings;
+use crate::game::puzzle::LichessPuzzleResponse;
 use crate::{database, engine::Board, game::controller::GameController};
 
 use serde::{Deserialize, Serialize};
-use sysinfo::System;
 
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
-use std::sync::mpsc::{self, SyncSender};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
 use std::sync::Mutex;
-use stockfish::{EngineEval, Stockfish};
+use stockfish::Stockfish;
 use ts_rs::TS;
 
 #[derive(Clone, Debug, TS, Serialize, Deserialize)]
@@ -164,23 +162,67 @@ impl Settings {
     }
 }
 #[derive(Deserialize)]
-pub struct OpeningEntry<'a> {
-    pub name: Cow<'a, str>,
-    pub moves: Vec<Cow<'a, str>>,
+pub struct OpeningEntry {
+    pub name: String,
+    pub moves: Vec<String>,
 }
 
-pub struct ServerState<'a> {
+/// Load the opening index from the bundled openings.json file.
+/// Returns `None` if the file is missing or cannot be parsed.
+pub fn load_opening_index() -> Option<HashMap<String, OpeningEntry>> {
+    let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src/openings.json"));
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return None,
+    };
+    let mut buf = String::new();
+    if file.read_to_string(&mut buf).is_err() {
+        return None;
+    }
+    match serde_json::from_str::<HashMap<String, OpeningEntry>>(&buf) {
+        Ok(index) => Some(index),
+        Err(e) => {
+            eprintln!("Failed to parse openings.json: {e}");
+            None
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlayerStatistics {
+    pub current_elo: u32,
+    pub accuracy: f32,
+    pub time_played: f32,
+    pub games_played: u32,
+    pub win_rate: f32,
+}
+impl Default for PlayerStatistics {
+    fn default() -> Self {
+        Self {
+            current_elo: Default::default(),
+            accuracy: Default::default(),
+            time_played: Default::default(),
+            games_played: Default::default(),
+            win_rate: Default::default(),
+        }
+    }
+}
+pub struct ServerState {
     pub engine: Option<Stockfish>,
-    pub opening_index: Option<HashMap<String, OpeningEntry<'a>>>,
+    pub opening_index: Option<HashMap<String, OpeningEntry>>,
     pub game_controller: GameController,
     pub analyzer_controller: AnalyzerController,
+    pub chess_puzzle: Option<(Board, LichessPuzzleResponse)>,
     pub analyzer_tx: Option<SyncSender<EngineCommand>>,
     pub analyzer_rx: Option<Receiver<PvObject>>,
     pub total_memory: f64,
     pub nbcpu: usize,
     pub settings: Settings,
+    pub syncing_with_chessdotcom: bool,
+    pub current_puzzle_solved: bool,
 }
-impl<'a> Default for ServerState<'a> {
+impl Default for ServerState {
     fn default() -> Self {
         let settings = load_settings().unwrap_or_else(|_| Settings {
             corrupted: true,
@@ -193,10 +235,16 @@ impl<'a> Default for ServerState<'a> {
             .parse()
             .unwrap_or(600);
 
-        let engine = match Stockfish::new("/usr/bin/stockfish") {
+        let stockfish_path = settings
+            .map
+            .get("StockfishPath")
+            .cloned()
+            .unwrap_or_else(|| crate::etc::DEFAULT_STOCKFISH_PATH.to_string());
+
+        let engine = match Stockfish::new(&stockfish_path) {
             Ok(mut s) => {
                 if s.setup_for_new_game().is_ok() {
-                    s.set_elo(stockfish_elo);
+                    let _ = s.set_elo(stockfish_elo);
                     Some(s)
                 } else {
                     None
@@ -207,31 +255,7 @@ impl<'a> Default for ServerState<'a> {
         let game_controller = GameController::default();
         let analyzer_controller = AnalyzerController::default();
 
-        let mut opening_index: Option<HashMap<String, OpeningEntry<'a>>> = None;
-        let path =
-            Path::new("/home/petru/storage/Projects/chess_app/Koch/src-tauri/src/openings.json");
-        let mut file = match File::open(path) {
-            Err(why) => {
-                println!("could not open openings : {why}");
-                None
-            }
-            Ok(file) => Some(file),
-        };
-        match file {
-            Some(mut f) => {
-                let mut buf = String::new();
-                f.read_to_string(&mut buf);
-                opening_index =
-                    match serde_json::from_str::<HashMap<String, OpeningEntry<'a>>>(&buf) {
-                        Ok(res) => Some(res),
-                        Err(e) => {
-                            eprintln!("{e}");
-                            None
-                        }
-                    };
-            }
-            None => {}
-        }
+        let opening_index = load_opening_index();
 
         database::create::create_database()
             .inspect_err(|e| eprintln!("{e}"))
@@ -240,41 +264,74 @@ impl<'a> Default for ServerState<'a> {
             engine,
             game_controller,
             analyzer_controller,
+            chess_puzzle: None,
             analyzer_rx: None,
             analyzer_tx: None,
             opening_index: opening_index,
             total_memory: 0.0,
             nbcpu: 1,
             settings: settings,
+            syncing_with_chessdotcom: false,
+            current_puzzle_solved: false,
         };
     }
 }
-impl<'a> ServerState<'a> {
+impl ServerState {
     pub fn update_elo(&mut self, elo_delta: i32) {
         let string_elo = self.settings.map.get("PlayerElo");
         match string_elo {
             Some(elo) => {
-                let num_elo = elo.parse::<i32>().unwrap();
+                let num_elo = elo.parse::<i32>().unwrap_or(500);
                 let updated_elo = num_elo + elo_delta;
                 self.settings
                     .update("PlayerElo".to_string(), updated_elo.to_string());
                 self.settings
                     .update("StockfishElo".to_string(), (updated_elo + 50).to_string());
             }
-            None => {
-                println!("[SETTINGS] No player elo in settings")
-            }
+            None => {}
         };
     }
 }
 #[tauri::command]
 pub fn get_system_information(state: tauri::State<'_, Mutex<ServerState>>) -> (f64, usize) {
     let state = state.lock().unwrap();
-    println!("RAM capacity: {} GB", &state.total_memory);
-    println!("Number of CPUs: {}", &state.nbcpu);
+
     (state.total_memory, state.nbcpu)
 }
-
+#[tauri::command]
+pub fn get_player_stats(state: tauri::State<'_, Mutex<ServerState>>) -> PlayerStatistics {
+    let state = state.lock().unwrap();
+    let elo = state
+        .settings
+        .map
+        .get("PlayerElo")
+        .unwrap_or(&"0".into())
+        .parse::<u32>()
+        .unwrap_or(0);
+    let games_played = state
+        .settings
+        .map
+        .get("GamesPlayed")
+        .unwrap_or(&"0".into())
+        .parse::<u32>()
+        .unwrap_or(0);
+    let games_won = state
+        .settings
+        .map
+        .get("GamesWon")
+        .unwrap_or(&"0".into())
+        .parse::<u32>()
+        .unwrap_or(0);
+    let mut stats = PlayerStatistics::default();
+    stats.current_elo = elo;
+    stats.games_played = games_played;
+    stats.win_rate = if games_played > 0 {
+        games_won as f32 / games_played as f32 * 100.0
+    } else {
+        0.0
+    };
+    stats
+}
 pub fn load_settings() -> Result<Settings, io::Error> {
     let mut settings_map = HashMap::new();
     let mut corrupted = false;

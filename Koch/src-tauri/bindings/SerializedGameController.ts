@@ -6,4 +6,4 @@ import type { PieceColor } from "./PieceColor";
 import type { SerializedBoard } from "./SerializedBoard";
 import type { TerminationReason } from "./TerminationReason";
 
-export type SerializedGameController = { player: PieceColor, mode: GameControllerMode, player_card: string, engine_card: string, board: SerializedBoard, player_clock: number, engine_clock: number, state: GameControllerState, termination_reason: TerminationReason | null, result: GameResult | null, elo_gain: number | null, can_be_abandoned: boolean, };
+export type SerializedGameController = { player: PieceColor, mode: GameControllerMode, player_card: string, engine_card: string, player_elo: number, board: SerializedBoard, player_clock: number, engine_clock: number, state: GameControllerState, termination_reason: TerminationReason | null, result: GameResult | null, elo_gain: number | null, can_be_abandoned: boolean, };

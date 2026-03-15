@@ -7,9 +7,7 @@
     "npm:@types/react-dom@^19.1.6": "19.2.3_@types+react@19.2.6",
     "npm:@types/react@^19.1.8": "19.2.6",
     "npm:@vitejs/plugin-react@^4.6.0": "4.7.0_vite@7.2.2__picomatch@4.0.3_@babel+core@7.28.5",
-    "npm:autoprefixer@^10.4.22": "10.4.22_postcss@8.5.6",
     "npm:lucide-react@0.554": "0.554.0_react@19.2.0",
-    "npm:postcss@^8.5.6": "8.5.6",
     "npm:react-dom@^19.1.0": "19.2.0_react@19.2.0",
     "npm:react@^19.1.0": "19.2.0",
     "npm:vite@^7.0.4": "7.2.2_picomatch@4.0.3"
@@ -807,17 +805,20 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@tailwindcss/vite@^4.2.1",
         "npm:@tauri-apps/api@2",
         "npm:@tauri-apps/cli@2",
         "npm:@tauri-apps/plugin-opener@2",
         "npm:@types/react-dom@^19.1.6",
         "npm:@types/react@^19.1.8",
         "npm:@vitejs/plugin-react@^4.6.0",
-        "npm:autoprefixer@^10.4.22",
+        "npm:autoprefixer@^10.4.27",
+        "npm:baseline-browser-mapping@^2.10.8",
         "npm:lucide-react@0.554",
-        "npm:postcss@^8.5.6",
+        "npm:postcss@^8.5.8",
         "npm:react-dom@^19.1.0",
         "npm:react@^19.1.0",
+        "npm:tailwindcss@^3.4.19",
         "npm:vite@^7.0.4"
       ]
     }

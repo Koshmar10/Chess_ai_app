@@ -1,8 +1,6 @@
-use crate::engine::{
-    board::{BoardMetaData, BoardUi},
-    Board, ChessPiece, PieceColor, PieceType,
-};
+use crate::engine::{board::BoardMetaData, Board, ChessPiece, PieceColor, PieceType};
 
+#[derive(Debug)]
 pub enum FenError {
     InvalidChar(char),
 }
@@ -179,8 +177,8 @@ pub fn fen_parser(fen: &String) -> Result<Board, FenError> {
     let to_move = parts[1];
     let castling_rights = parts[2];
     let en_passant_targets = parts[3];
-    let halfmove_clock: u32 = parts[4].parse().unwrap();
-    let fullmove_number: u32 = parts[5].parse().unwrap();
+    let halfmove_clock: u32 = parts[4].parse().unwrap_or(0);
+    let fullmove_number: u32 = parts[5].parse().unwrap_or(1);
     let fen_files: Vec<&str> = board_representation.split("/").collect();
     let mut i: u8 = 0;
     let mut next_id = 0;
@@ -190,7 +188,7 @@ pub fn fen_parser(fen: &String) -> Result<Board, FenError> {
             if elem.is_numeric() {
                 j += elem.to_digit(10).unwrap() as u8;
             } else {
-                let (kind, color, pos, move_count) = match elem {
+                let (kind, color, pos, _move_count) = match elem {
                     'r' => (PieceType::Rook, PieceColor::Black, (i, j), 0),
                     'n' => (PieceType::Knight, PieceColor::Black, (i, j), 0),
                     'b' => (PieceType::Bishop, PieceColor::Black, (i, j), 0),
@@ -327,14 +325,21 @@ impl ToString for Board {
             board_string += "/";
         }
         board_string = board_string.trim_end_matches("/").to_string();
-        let en_passant = "-"; // placeholder if no en-passant target
+        let en_passant = match self.en_passant_target {
+            Some((row, col)) => {
+                let file = (b'a' + col) as char;
+                let rank = 8 - row;
+                format!("{}{}", file, rank)
+            }
+            None => "-".to_string(),
+        };
         return board_string
             + " "
             + &to_move
             + " "
             + &castleing_rights
             + " "
-            + en_passant
+            + &en_passant
             + " "
             + &self.halfmove_clock.to_string()
             + " "
@@ -366,7 +371,7 @@ pub fn translate_fen_for_model(fen: &str) -> String {
         board_rows.push("  a b c d e f g h ".into());
         board_rows.join("\n")
     };
-    println!("{}", board_rows);
+
     board_rows
 }
 pub fn make_empty_cols(count: usize) -> Vec<String> {
